@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, "/home/naveen/Desktop/Learned representation/Raptor")
 from real_data import load_sessions, DATASET_DIR
 from src.models.raptorfm import RAPTORFM
+from l1_rssi import compute_log_rms
 
 T_CHUNK = 4096
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -70,17 +71,20 @@ def build_l2_model(ckpt_path):
 
 def extract_l1_l2(df, l2_model, real_scale, bs=64):
     """Adds log_rms (L1) and l2_pred (L2) columns to df, in the SAME row order (preserves
-    chronological order)."""
-    W = np.stack(df['window'].values)
+    chronological order). L1 is computed standalone on the RAW window, independent of L2's
+    own input-scaling convention -- it does not require l2_model at all, and is only computed
+    here alongside L2 for convenience (one pass over the session's windows). L2's prediction
+    still needs the model's own scale convention (real_scale) since that's how it was trained."""
+    W = np.stack(df['window'].values)  # raw, unscaled complex64
+    log_rms = compute_log_rms(W)  # L1 -- standalone, no model dependency
+
     Wn = (W / real_scale).astype(np.complex64)
     Wr = np.stack([Wn.real, Wn.imag], axis=-1).astype(np.float32)  # [N,T,2]
-    log_rms = np.empty(len(Wr), dtype=np.float32)
     l2_pred = np.empty(len(Wr), dtype=np.float32)
     with torch.no_grad():
         for s in range(0, len(Wr), bs):
             xb = torch.from_numpy(Wr[s:s+bs]).unsqueeze(2).float().to(DEVICE)
             out = l2_model(xb)
-            log_rms[s:s+bs] = out['log_rms'].squeeze(-1).float().cpu().numpy()
             l2_pred[s:s+bs] = out['range_pred'].float().cpu().numpy()
     df = df.copy()
     df['log_rms'] = log_rms
