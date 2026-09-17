@@ -4,6 +4,37 @@ Confound-free synthetic data generation + a Radio-FM-style foundation model, bui
 single-channel RF drone range estimation. This repo captures the synthetic-pretraining research
 track of a larger project; the production/EKF-tracker side lives elsewhere.
 
+## Status: not a demonstrated working capability yet
+
+Read this before anything else in this README. The metric used through most of this
+investigation (Spearman rank correlation) answers "is the ranking of readings preserved,"
+not "does a given reading land in the right distance bucket" — which was the actual original
+goal. That mismatch went uncorrected for most of a working session and inflated how positive
+earlier results looked.
+
+Once corrected to score actual bucket classification accuracy (see `bucket_pipeline_979.py`),
+two things became clear:
+
+1. **Every tracked result in this repo — including the bucket-accuracy numbers — assumes the
+   tracker is given the true distance at the start of tracking (an "anchor").** No cold-start
+   capability (estimate distance/bucket with zero prior information) was ever built or
+   demonstrated. This is not a fixable bug; it follows from a formal observability proof: a
+   single passive receiver cannot distinguish "close + weak transmitter" from "far + strong
+   transmitter" from signal strength alone — that ambiguity is only resolved by knowing the
+   transmit power precisely, or by an external reference distance at first detection.
+2. **The one bucket-accuracy result produced (55.5% tracked vs. 39.5% majority-class baseline,
+   on `979_S4`) is a single held-out session — n=1.** It has not been validated across multiple
+   held-out sessions (a leave-one-session-out sweep across all four `979` sessions), and this
+   project has repeatedly seen results swing from strong to catastrophic across sessions for the
+   same method. Treat this number as unvalidated, not as a demonstrated capability.
+
+**A path forward identified but not yet built**: bearings-only tracking (Target Motion
+Analysis) using angle-only measurements from a coherent antenna array. Angle is a pure geometry
+measurement, independent of the transmitter's power, so it doesn't need either a calibrated
+transmit power or an external reference distance. RSS-based ranging (everything in this repo)
+would demote to a secondary, supporting signal fused into that tracker, not the primary range
+source.
+
 ## The problem this exists to solve
 
 The team's real captured RF dataset (single-channel IQ, DJI OcuSync-family drones) cannot support
@@ -111,6 +142,13 @@ through careful, validated adaptation.
    on the same unseen-drone sessions were far weaker and barely distinguishable between methods
    (mini5_S1: log_rms 0.460 / pretrained 0.448 / random 0.450; mini5_S3: 0.640 / 0.644 / 0.657) —
    the L3 temporal fusion is doing real, substantial work here, not just window-by-window scoring.
+6. **Bucket-accuracy re-evaluation** (`bucket_pipeline_979.py`, same-drone only — 979 dataset,
+   `979_S1/S2/S3` train, `979_S4` held out validation, coarse5 bucket scheme
+   0-100/100-300/300-700/700-1500/1500+m): anchor-conditioned tracked bucket accuracy 55.5%
+   (`log_rms`) / 47.9% (pretrained model) / 44.0% (random control), vs. a 39.5% majority-class
+   baseline and 22.7% freeze-at-anchor baseline. The confusion matrix shows real, systematic
+   bias (under-predicting the 100-300m bucket, over-predicting 300-700m) — this is a single
+   held-out session, not cross-validated, see Status section above.
 
 ## Deployed-hardware reference (metadata only, not yet used)
 
@@ -123,7 +161,7 @@ two-antenna DOA (bearing) model exists separately; the natural extension for ful
 L1 (per-antenna RSSI) → L2a (this repo's range model) + L2b (the DOA model) → L3 (a genuine
 nonlinear EKF/UKF fusing range and bearing).
 
-## Status / honest open questions
+## Other open questions
 
 - One of three unseen-drone test sessions (`mini5_S2`) has a known ground-truth/anchor pathology
   that makes every method fail on it, including the raw physical feature -- it should be treated
