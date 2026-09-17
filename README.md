@@ -80,11 +80,37 @@ through careful, validated adaptation.
    probe): pretraining still didn't durably beat random on single-window comparisons, but the gap
    narrowed substantially, and further narrowed again once genuine self-supervised (not just
    supervised-regression) pretraining was used on real IQ data.
-5. **The L1→L2→L3 pipeline test**: once L2's prediction is fused over time through the VB-AKF
-   tracker (matching how this would actually be deployed, rather than judged window-by-window),
-   both `log_rms` and the model's own prediction reach Spearman 0.8–0.97 on sessions with real
-   signal — dramatically higher than any single-window number produced all session, and on at
-   least one session the model's own prediction *beat* the raw physical feature once tracked.
+5. **The L1→L2→L3 pipeline test, with genuine unseen-drone holdout**: L2 was pretrained (SSL +
+   supervised) and adapted (BitFit) using only one drone's data (`Mini_2`/`Mini_Pro_4`, 4
+   sessions) — the target drone (`mini_5_pro`) was excluded from synthetic waveform sourcing,
+   the SSL reconstruction pool, and adaptation entirely, not just its distance labels. L1 was
+   also decoupled into its own standalone, model-free function (`l1_rssi.py`) rather than being
+   read out of the L2 model's internals.
+
+   Tracked (VB-AKF) Spearman on the three never-seen `mini_5_pro` sessions:
+
+   | session | log_rms | L2 pred (pretrained) | L2 pred (random) | fused (pretrained) | fused (random) |
+   |---|---|---|---|---|---|
+   | mini5_S1 | 0.601 | 0.495 | 0.539 | 0.661 | 0.617 |
+   | mini5_S2 | **−0.956** | −0.934 | −0.735 | −0.952 | −0.939 |
+   | mini5_S3 | 0.888 | 0.892 | 0.878 | 0.907 | 0.899 |
+
+   Compared against a same-drone validation session (`979_S1`, held out from gradient updates
+   throughout, never from the target drone's synthetic/SSL/adaptation exclusion since it's the
+   *training* drone) evaluated the same way: log_rms 0.720, L2 pred 0.708 (pretrained) / 0.715
+   (random), fused 0.710 / 0.716.
+
+   `mini5_S2` (n=270, the smallest session) is catastrophically negative for *every* method
+   including raw `log_rms` — this is the known data-quality/anchor pathology flagged earlier in
+   the investigation, not a drone-generalization failure. Excluding it, unseen-drone performance
+   (`mini5_S1`: 0.5–0.66, `mini5_S3`: 0.88–0.91) is essentially on par with the same-drone
+   validation session (0.71–0.72) — the pipeline generalizes to a genuinely unseen drone about as
+   well as it generalizes to a held-out session of a drone it trained on. Pretrained vs. random
+   stays mixed and close throughout (neither consistently wins), consistent with the small-but-
+   real pretraining edge found earlier, not a dominant one. Single-window (non-tracked) numbers
+   on the same unseen-drone sessions were far weaker and barely distinguishable between methods
+   (mini5_S1: log_rms 0.460 / pretrained 0.448 / random 0.450; mini5_S3: 0.640 / 0.644 / 0.657) —
+   the L3 temporal fusion is doing real, substantial work here, not just window-by-window scoring.
 
 ## Deployed-hardware reference (metadata only, not yet used)
 
@@ -99,12 +125,14 @@ nonlinear EKF/UKF fusing range and bearing).
 
 ## Status / honest open questions
 
-- Whether SSL pretraining's real transferable edge survives a *fully* clean protocol (this run's
-  SSL pool excluded the target session's/drone's data; a stricter version would also verify no
-  indirect leakage through session-recognition shortcuts).
-- The L1→L2→L3 pipeline numbers above are genuinely encouraging but were run with differing
-  degrees of drone/session holdout across iterations — check each script's own docstring/manifest
-  for exactly what was held out before citing a specific number.
+- One of three unseen-drone test sessions (`mini5_S2`) has a known ground-truth/anchor pathology
+  that makes every method fail on it, including the raw physical feature -- it should be treated
+  as a data-quality issue to fix/exclude, not folded into a single "unseen drone" headline number
+  without the caveat above.
+- Pretrained-vs-random-backbone remains genuinely close on both the unseen-drone and same-drone
+  validation sessions -- the SSL pretraining recipe used here has a small, real edge in some
+  configurations, not a dominant one. Whether a different objective, more waveform diversity, or
+  more real IQ diversity would widen that edge is untested.
 - Full 2D/3D position estimation is blocked on actually building/using the multi-channel capture
   path — not attempted here.
 
